@@ -33,8 +33,8 @@ struct file_dir
 	block_t* file_list[FILE_MAX];
 };
 
-void create_file(file_t* new_file, disk_t* _disk, fat* _fat, file_t* _current_dir, char _name[], char _ext[]);
-void create_dir(disk_t* _disk, fat* _fat, file_t* current_dir, char _name[]);
+file_t* create_file(disk_t* _disk, fat* _fat, file_t* _current_dir, char _name[], char _ext[]);
+file_t* create_dir(disk_t* _disk, fat* _fat, file_t* current_dir, char _name[]);
 
 uint32_t get_next_free_block(fat* _fat);
 
@@ -49,9 +49,11 @@ void write_file(file_t* _file, uint8_t buf[], uint32_t len, fat* _fat, disk_t* _
 file_t* file_sys_read(disk_t* _disk, fat* _fat, FILE* virtual_disk);
 void read_file(file_t* _file, uint8_t buf[], disk_t* _disk, fat* _fat);
 
-file_t* get_children(file_t* dir, disk_t* _disk, fat* _fat);
+file_t** get_children(file_t* dir, disk_t* _disk, fat* _fat);
 
 file_t* my_open(char path[], file_t* _root, disk_t* _disk, fat* _fat);
 void get_path(file_t* dir, disk_t* _disk, fat* fat, file_t* _root);
 file_t * get_file_from_binary(uint8_t data[]);
+file_t* get_father(file_t* _file, disk_t* _disk, fat * _fat);
+void write_binary_from_file(file_t* _file, disk_t* _disk, fat * _fat);
 #endif

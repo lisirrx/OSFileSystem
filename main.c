@@ -1,10 +1,11 @@
 #include <stdio.h>
-#include <io.h>
 #include <stdint.h>
 #include <string.h>
 #include <time.h>
 #include <malloc.h>
 #include <memory.h>
+#include <zconf.h>
+#include <stdlib.h>
 #include "Config.h"
 #include "FileSystem.h"
 
@@ -40,66 +41,59 @@ int main(){
         char ins[100];
         char name[100];
         scanf("%s", ins);
-        int flag = 0;
-        if(strcmp(ins, "ls") != 0){
-            flag = 1;
-        } else if(strcmp(ins, "quit") == 0){
+
+
+        if((strcmp(ins, "ls") == 0)) {
+//            int cnt = current->len / ENTRY_SIZE;
+//            if (cnt != 0) {
+            file_t **files = get_children(current, &disk, &fat);
+            int i = 0;
+            while(&files[i] != NULL) {
+                printf("%s\t%s\t%d-%d-%d %d:%d:%d\t%d bytes\n", files[i]->name, files[i]->ext,
+                       files[i]->date[0] + 1900, files[i]->date[1] + 1, files[i]->date[2],
+                       files[i]->date[3], files[i]->date[4], files[i]->date[5], files[i]->len);
+                i++;
+            }
+
+
+        } else if(strcmp(ins, "exit") == 0) {
             save_disk(&disk, &fat, f);
             exit(0);
-        }
 
-        if(!flag){
+        } else {
             scanf("%s", name);
-        }
-
-        if(strcmp(ins, "cd" )== 0){
-            int cnt = current->len/ENTRY_SIZE;
-            file_t * files = get_children(current, &disk, &fat);
-            int flag = 0;
-            for (int i = 0; i < cnt; ++i) {
-                if(strcmp(files[i].name, name) == 0){
-                    flag = 1;
-                    current = &files[i];
-                    strcat(dir_name, files->name);
-                }
-            }
-            if(flag == 0){
-                printf("Not exist.\n");
-            }
-        } else if(strcmp(ins, "mkdir") == 0){
-            create_dir(&disk, &fat, current, name);
-        } else if(strcmp(ins, "ls") == 0){
-            int cnt = current->len/ENTRY_SIZE;
-            if(cnt != 0){
-                file_t* files =  get_children(current, &disk, &fat);
+            if (strcmp(ins, "cd") == 0) {
+                int cnt = current->len / ENTRY_SIZE;
+                file_t **files = get_children(current, &disk, &fat);
+                int flag = 0;
                 for (int i = 0; i < cnt; ++i) {
-                    printf("%s\t%s\t%d-%d-%d %d:%d:%d\t%d bytes\n", files[i].name, files->ext,
-                           files->date[0] + 1900, files->date[1] + 1, files->date[2],
-                           files->date[3],files->date[4],files->date[5]);
-
+                    if (strcmp(files[i]->name, name) == 0) {
+                        flag = 1;
+                        current = files[i];
+                        strcat(dir_name, files[i]->name);
+                    }
                 }
+                if (flag == 0) {
+                    printf("Not exist.\n");
+                }
+            } else if (strcmp(ins, "mkdir") == 0) {
+                create_dir(&disk, &fat, current, name);
+            } else if (strcmp(ins, "touch") == 0) {
+                file_t *f = malloc(sizeof(file_t));
+                if (strstr(name, ".") == NULL) {
+                    create_file( &disk, &fat, current, name, "");
+                } else {
+                    char ext[3];
+                    ext[0] = name[strlen(name) - 3];
+                    ext[1] = name[strlen(name) - 2];
+                    ext[2] = name[strlen(name) - 1];
+                    char new_name[strlen(name) - 4];
+                    strncpy(new_name, name, strlen(name) - 4);
+                    create_file(&disk, &fat, current, new_name, ext);
+                }
+
             }
-
-        } else if(strcmp(ins, "save")){
-            save_disk(&disk, &fat, f);
-        } else if(strcmp(ins, "touch")){
-            file_t *f;
-
-            if(strstr(name, ".") == NULL){
-                create_file(f, &disk, &fat, current, name, "");
-            } else{
-                char ext[3];
-                ext[0] = name[strlen(name) - 3];
-                ext[1] = name[strlen(name) - 2];
-                ext[2] = name[strlen(name) - 1];
-                char new_name[strlen(name) - 4];
-                strncpy(new_name, name, strlen(name) - 4);
-                create_file(f, &disk, &fat, current, new_name, ext);
-            }
-
         }
         printf("$ ");
     }
-
-    save_disk(&disk, &fat, f);
 }

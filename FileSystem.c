@@ -6,10 +6,14 @@
 #include "Block.h"
 #include "FileSystem.h"
 
-void create_file(file_t* new_file, disk_t* _disk, fat* _fat, file_t* _current_dir, char _name[], char _ext[]) {
-	memcpy(new_file->name, _name, strlen(_name));
-	memcpy(new_file->ext, _ext, strlen(_ext));
+file_t* create_file(disk_t* _disk, fat* _fat, file_t* _current_dir, char _name[], char _ext[]) {
+	file_t* new_file = malloc(sizeof(file_t));
+	memcpy(new_file->name, _name, strlen(_name) + 1);
+	memcpy(new_file->ext, _ext, strlen(_ext) + 1);
 	new_file->len = 0;
+	if (strcmp(_ext, "dir") == 0){
+		new_file->is_dir = 1;
+	}
 	
 	time_t timep;
 	struct tm *p;
@@ -23,24 +27,23 @@ void create_file(file_t* new_file, disk_t* _disk, fat* _fat, file_t* _current_di
 	new_file->date[5] = p->tm_sec;
 	new_file->start = get_next_free_block(_fat);
 	add_dir_entry(new_file, _current_dir, _disk, _fat);
+	return new_file;
 }
 
-void create_dir(disk_t* _disk, fat* _fat, file_t* _current_dir, char _name[]) {
-	file_t new_file;
-	memset(new_file.name, 0, 9);
-	memset(new_file.ext, 0, 4);
-	new_file.is_dir = 1;
-	create_file(&new_file, _disk, _fat, _current_dir, _name, "dir");
+file_t* create_dir(disk_t* _disk, fat* _fat, file_t* _current_dir, char _name[]) {
+	file_t* new_file =  create_file(_disk, _fat, _current_dir, _name, "dir");
+
+
 
 	file_t* child = malloc(sizeof(file_t));
 	file_t* father = malloc(sizeof(file_t));
 	
-	memcpy(child->date, new_file.date, 6 * sizeof(uint8_t));
-	child->is_dir = new_file.is_dir;
+	memcpy(child->date, new_file->date, 6 * sizeof(uint8_t));
+	child->is_dir = new_file->is_dir;
 	memcpy(child->name, ".\0", strlen(".") + 1);
 	memcpy(child->ext, "dir\0", strlen("dir") + 1);
-	child->len = new_file.len;
-	child->start = new_file.start;
+	child->len = new_file->len;
+	child->start = new_file->start;
 
 	memcpy(father->date, _current_dir->date, 6 * sizeof(uint8_t));
 	father->is_dir = _current_dir->is_dir;
@@ -49,31 +52,72 @@ void create_dir(disk_t* _disk, fat* _fat, file_t* _current_dir, char _name[]) {
 	father->len = _current_dir->len;
 	father->start = _current_dir->start;
 
-	add_dir_entry(child, &new_file, _disk, _fat);
-	add_dir_entry(father, &new_file, _disk, _fat);
+	add_dir_entry(child, new_file, _disk, _fat);
+	add_dir_entry(father, new_file, _disk, _fat);
 
 }
 
-file_t* get_children(file_t* _dir, disk_t* _disk, fat* _fat) {
+void add_dir_entry(file_t* _new_file, file_t * _father_dir, disk_t* _disk, fat* _fat) {
+
+    uint8_t buf[32];
+	memset(buf, 0, 32);
+	memcpy(buf, _new_file->name, 9);
+	memcpy(buf + 9, _new_file->ext, 4);
+	memcpy(buf + 13, &_new_file->start, 4);
+	memcpy(buf + 17, _new_file->date, 6);
+	memcpy(buf + 23, &_new_file->len, 4);
+	memcpy(buf + 28, &_new_file->is_dir, 1);
+	write_file(_father_dir, buf, 32, _fat, _disk);
+}
+void write_file(file_t* _file, uint8_t buf[], uint32_t len, fat* _fat, disk_t* _disk) {
+	int block_cnt = _file->len / BLOCK_SIZE;
+	int block_remain = _file->len % BLOCK_SIZE;
+	uint32_t block_num = _file->start;
+	for (size_t i = 0; i < block_cnt; i++) {
+		block_num = _fat->fat_entries[block_num];
+	}
+    int new_len = len;
+	int index = block_num;
+
+	while (len >= BLOCK_SIZE - block_remain){
+		len = len - (BLOCK_SIZE - block_remain);
+		_fat->fat_entries[index] = get_next_free_block(_fat);
+		memcpy(_disk->blocks[index].content + block_remain, buf + (new_len - len), BLOCK_SIZE - block_remain);
+		index = _fat->fat_entries[index];
+		block_remain = 0;
+	}
+
+	memcpy(_disk->blocks[index].content + block_remain, buf+(new_len - len) , len);
+	_fat->fat_entries[index] = 0x0FFFFFFF;
+
+	_file->len += len;
+}
+
+file_t** get_children(file_t* _dir, disk_t* _disk, fat* _fat) {
 	int index = _dir->start;
 	uint8_t buf[_dir->len];
 	read_file(_dir, buf, _disk, _fat);
 
 	uint8_t entries[_dir->len / ENTRY_SIZE][ENTRY_SIZE];
-	file_t *children = malloc(_dir->len/ENTRY_SIZE * sizeof(file_t));
+	file_t **children = malloc((_dir->len/ENTRY_SIZE + 1) * sizeof(file_t*));
+
+    for (int i = 0; i <_dir->len/ENTRY_SIZE ; ++i) {
+        children[i] = malloc(sizeof(file_t));
+    }
+    children[_dir->len/ENTRY_SIZE] = NULL;
 	for (size_t i = 0; i < _dir->len / ENTRY_SIZE; i++) {
 		memcpy(entries[i], buf + i * ENTRY_SIZE, ENTRY_SIZE);
-		memcpy(children[i].name, entries[i], 9);
-		memcpy(children[i].ext, entries[i] + 9, 4);
-		children[i].start = get_a_int(entries[i] + 13);
-		children[i].date[0] = entries[i][17];
-		children[i].date[1] = entries[i][18];
-		children[i].date[2] = entries[i][19];
-		children[i].date[3] = entries[i][20];
-		children[i].date[4] = entries[i][21];
-		children[i].date[5] = entries[i][22];
-		children[i].len = get_a_int(entries[i] + 23);
-		children[i].is_dir = entries[i][27];
+		memcpy(children[i]->name, entries[i], 9);
+		memcpy(children[i]->ext, entries[i] + 9, 4);
+		children[i]->start = get_a_int(entries[i] + 13);
+		children[i]->date[0] = entries[i][17];
+		children[i]->date[1] = entries[i][18];
+		children[i]->date[2] = entries[i][19];
+		children[i]->date[3] = entries[i][20];
+		children[i]->date[4] = entries[i][21];
+		children[i]->date[5] = entries[i][22];
+		children[i]->len = get_a_int(entries[i] + 23);
+		children[i]->is_dir = entries[i][27];
 	}
 
 	return children;
@@ -108,7 +152,7 @@ file_t*  file_sys_init(disk_t* _disk, fat* _fat) {
 	memset(block_0->content + 4, DISK_SIZE, sizeof(DISK_SIZE));
 	memset(block_0->content + 4 + sizeof(DISK_SIZE), BLOCK_SIZE, sizeof(BLOCK_SIZE));
 	block_t * block_1 = &(_disk->blocks[1]);
-	memcpy(block_1->content, _fat->fat_entries, BLOCK_SIZE);
+	memcpy(_fat->fat_entries, block_1->content, BLOCK_SIZE);
 	
 	//Create root
 	block_t* block_2 = &(_disk->blocks[2]);
@@ -138,7 +182,24 @@ file_t*  file_sys_init(disk_t* _disk, fat* _fat) {
 	root->len = 0;
 	root->is_dir = 1;
 
-	return root;
+
+    root->len += 32;
+
+    file_t* child = malloc(sizeof(file_t));
+
+    memcpy(child->date, root->date, 6 * sizeof(uint8_t));
+    child->is_dir = root->is_dir;
+    memcpy(child->name, ".\0", strlen(".") + 1);
+    memcpy(child->ext, "dir\0", strlen("dir") + 1);
+    child->len = root->len;
+    child->start = root->start;
+
+
+
+    add_dir_entry(child, root, _disk, _fat);
+
+
+    return root;
 
 	
 }
@@ -153,40 +214,8 @@ file_t* file_sys_read(disk_t* _disk, fat* _fat, FILE* virtual_disk) {
 }
 
 
-void add_dir_entry(file_t* _new_file, file_t * _father_dir, disk_t* _disk, fat* _fat) {
-	uint8_t buf[32];
-	memcpy(buf, _new_file->name, 9);
-	memcpy(buf + 9, _new_file->ext, 4);
-	memcpy(buf + 13, &_new_file->start, 4);
-	memcpy(buf + 17, _new_file->date, 6);
-	memcpy(buf + 23, &_new_file->len, 4);
-	memcpy(buf + 28, &_new_file->is_dir, 1);
-	write_file(_father_dir, buf, 32, _fat, _disk);
-}
 
-void write_file(file_t* _file, uint8_t buf[], uint32_t len, fat* _fat, disk_t* _disk) {
-	int block_cnt = _file->len / BLOCK_SIZE;
-	int block_remain = _file->len % BLOCK_SIZE;
-	uint32_t block_num = _file->start;
-	for (size_t i = 0; i < block_cnt; i++) {
-		block_num = _fat->fat_entries[block_num];
-	}
 
-	int index = block_num;
-
-	while (len > BLOCK_SIZE || len + block_remain > BLOCK_SIZE) {
-		len = len - (BLOCK_SIZE - block_remain);
-		_fat->fat_entries[index] = get_next_free_block(_fat);
-		memcpy(_disk->blocks[index].content + block_remain, buf, BLOCK_SIZE - block_remain);
-		index = _fat->fat_entries[index];
-		block_remain = 0;
-	}
-
-	memcpy(_disk->blocks[index].content + block_remain, buf, BLOCK_SIZE - block_remain);
-	_fat->fat_entries[index] = 0x0FFFFFFF;
-
-	_file->len += len;
-}
 
 void read_file(file_t* _file, uint8_t buf[] ,disk_t* _disk, fat* _fat) {
 	int index = _file->start;
@@ -233,12 +262,12 @@ file_t* my_lsopen(char path[], file_t* _root, disk_t* _disk, fat* _fat) {
         memcpy(paths[itor], p, strlen(p));
         itor++;
     }
-    file_t* children;
+    file_t** children;
     for (int j = 0; j < cnt; ++j) {
         children =  get_children(_root, _disk, _fat);
         for (int i = 0; i < _root->len / ENTRY_SIZE; ++i) {
-            if(strcmp(children[i].name, paths[j]) == 0){
-                _root = &children[i];
+            if(strcmp(children[i]->name, paths[j]) == 0){
+                _root = children[i];
             }
         }
     }
@@ -262,5 +291,14 @@ file_t * get_file_from_binary(uint8_t data[]){
     f->date[5] = data[22];
     f->len = get_a_int(data + 23);
     f->is_dir = data[28];
+
+}
+
+
+file_t* get_father(file_t* _file, disk_t* _disk, fat * _fat){
+    uint8_t father_data[ENTRY_SIZE];
+    memcpy(father_data, _disk->blocks[_file->start].content + ENTRY_SIZE, ENTRY_SIZE);
+    file_t* father = get_file_from_binary(father_data);
+    return father;
 
 }
